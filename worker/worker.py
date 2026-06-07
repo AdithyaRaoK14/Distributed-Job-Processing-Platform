@@ -25,7 +25,7 @@ import asyncpg
 import httpx
 import redis.asyncio as aioredis
 
-from .job_handlers import JOB_HANDLERS
+from job_handlers import JOB_HANDLERS
 
 logging.basicConfig(
     level=logging.INFO,
