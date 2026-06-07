@@ -1,4 +1,3 @@
-import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -69,6 +68,14 @@ async def mock_queue():
             "failed": 0,
         }
     )
+
+    # Mock Redis used by metrics.py
+    mock_redis = MagicMock()
+    mock_redis.hincrby = AsyncMock(return_value=1)
+    mock_redis.expire = AsyncMock(return_value=True)
+    mock_redis.hgetall = AsyncMock(return_value={})
+
+    queue.redis = mock_redis
 
     return queue
 
