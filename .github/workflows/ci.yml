@@ -11,7 +11,7 @@ test-backend:
 name: Backend Tests
 runs-on: ubuntu-latest
 
-
+```
 services:
   postgres:
     image: postgres:15-alpine
@@ -97,24 +97,18 @@ steps:
     with:
       context: ./backend
       push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
 
   - name: Build worker image
     uses: docker/build-push-action@v5
     with:
       context: ./worker
       push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
 
   - name: Build frontend image
     uses: docker/build-push-action@v5
     with:
       context: ./frontend
       push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
 ```
 
 integration:
@@ -139,15 +133,8 @@ steps:
 
   - name: Debug containers
     run: |
-      echo "=== Docker PS ==="
       docker ps -a
-
-      echo ""
-      echo "=== Compose PS ==="
       docker compose ps
-
-      echo ""
-      echo "=== Worker Logs ==="
       docker compose logs worker
 
   - name: Smoke test — submit and poll a job
@@ -177,23 +164,11 @@ steps:
     run: |
       WORKERS=$(curl -sf http://localhost:8000/api/workers | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
       echo "Active workers: $WORKERS"
-
       [ "$WORKERS" -ge 1 ] || (echo "No workers registered!" && exit 1)
 
   - name: Print logs on failure
     if: failure()
-    run: |
-      echo "=== Backend Logs ==="
-      docker compose logs backend
-
-      echo "=== Worker Logs ==="
-      docker compose logs worker
-
-      echo "=== Redis Logs ==="
-      docker compose logs redis
-
-      echo "=== Postgres Logs ==="
-      docker compose logs postgres
+    run: docker compose logs
 
   - name: Tear down
     if: always()
