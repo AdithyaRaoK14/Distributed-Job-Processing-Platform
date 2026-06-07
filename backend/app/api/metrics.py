@@ -16,7 +16,7 @@ async def get_metrics(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Queue depths from Redis
     depths = await queue.get_depths()
-    redis_stats = await queue.get_stats()
+    #redis_stats = await queue.get_stats()
 
     # DB aggregates
     status_counts_result = await db.execute(
