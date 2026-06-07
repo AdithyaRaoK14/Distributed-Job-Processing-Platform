@@ -5,6 +5,7 @@ Install: pip install fakeredis
 import time
 import pytest
 import pytest_asyncio
+import asyncio
 
 try:
     import fakeredis.aioredis as fakeredis
@@ -26,9 +27,11 @@ pytestmark = pytest.mark.skipif(not HAS_FAKEREDIS, reason="fakeredis not install
 async def queue():
     client = fakeredis.FakeRedis(decode_responses=True)
     q = RedisQueue(client)
-    yield q
-    await client.flushall()
-    await client.aclose()
+
+    try:
+        yield q
+    finally:
+        await client.aclose()
 
 
 # ── Priority scoring ───────────────────────────────────────────────────────────
