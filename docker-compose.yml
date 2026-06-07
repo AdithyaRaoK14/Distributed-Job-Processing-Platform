@@ -39,8 +39,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jobqueue
       REDIS_URL: redis://redis:6379
-      HEARTBEAT_TIMEOUT: 30
-      ORCHESTRATOR_INTERVAL: 5
+      HEARTBEAT_TIMEOUT: 45
+      ORCHESTRATOR_INTERVAL: 10
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,8 +65,6 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    deploy:
-      replicas: 3
 
   frontend:
     build:
