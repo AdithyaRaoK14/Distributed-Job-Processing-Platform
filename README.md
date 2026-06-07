@@ -1,6 +1,6 @@
 # Distributed Job Processing Platform
 
-[![CI](https://github.com/AdithyaRaoK14/distributed-job-queue/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/distributed-job-queue/actions/workflows/ci.yml)
+[![CI](https://github.com/AdithyaRaoK14/Distributed-Job-Processing-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/AdithyaRaoK14/Distributed-Job-Processing-Platform/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)
 ![Redis](https://img.shields.io/badge/Redis-7-red)
