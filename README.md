@@ -110,7 +110,7 @@ If a job with the same key already exists, the API returns the existing job (HTT
 ### Run
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/distributed-job-queue
+git clone https://github.com/AdithyaRaoK14/Distributed-Job-Processing-Platform.git
 cd distributed-job-queue
 
 docker compose up --build -d
