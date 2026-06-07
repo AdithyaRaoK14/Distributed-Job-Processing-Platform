@@ -10,16 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
-# ─────────────────────────────────────────────────────────────
-# Event loop
-# ─────────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
 
 # ─────────────────────────────────────────────────────────────
 # Database
