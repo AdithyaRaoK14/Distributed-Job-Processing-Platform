@@ -1,169 +1,187 @@
 name: CI
-on: push: branches: [main, develop] pull_request: branches: [main]
-jobs: test-backend: name: Backend Tests runs-on: ubuntu-latest
-services:
-  postgres:
-    image: postgres:15-alpine
-    env:
-      POSTGRES_DB: jobqueue_test
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - 5432:5432
-    options: >-
-      --health-cmd pg_isready
-      --health-interval 5s
-      --health-timeout 5s
-      --health-retries 10
 
-steps:
-  - uses: actions/checkout@v4
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 
-  - name: Set up Python 3.11
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.11"
-      cache: pip
+jobs:
 
-  - name: Install backend dependencies
-    run: |
-      pip install -r backend/requirements.txt
-      pip install fakeredis aiosqlite pytest-cov
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  - name: Install worker dependencies
-    run: pip install -r worker/requirements.txt
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-  - name: Run tests with coverage
-    env:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/jobqueue_test
-      REDIS_URL: redis://localhost:6379
-      PYTHONPATH: ${{ github.workspace }}
-    run: |
-      pytest tests/ -v \
-        --cov=backend/app \
-        --cov-report=term-missing \
-        --cov-report=xml \
-        --tb=short \
-        -p no:warnings
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r worker/requirements.txt
+          pip install fakeredis aiosqlite pytest-cov
 
-  - name: Upload coverage
-    uses: codecov/codecov-action@v4
-    with:
-      file: coverage.xml
-      fail_ci_if_error: false
-lint: name: Lint runs-on: ubuntu-latest
-steps:
-  - uses: actions/checkout@v4
+      - name: Run tests with coverage
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest tests/ -v \
+            --cov=backend/app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --tb=short \
+            -p no:warnings
 
-  - uses: actions/setup-python@v5
-    with:
-      python-version: "3.11"
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
 
-  - run: pip install ruff
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  - run: ruff check backend/ worker/ --select E,W,F --ignore E501
-build-images: name: Build Docker Images runs-on: ubuntu-latest
-steps:
-  - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-  - name: Set up Docker Buildx
-    uses: docker/setup-buildx-action@v3
+      - name: Run ruff
+        run: |
+          pip install ruff
+          ruff check backend/ worker/ --select E,W,F --ignore E501
 
-  - name: Build backend image
-    uses: docker/build-push-action@v5
-    with:
-      context: ./backend
-      push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  - name: Build worker image
-    uses: docker/build-push-action@v5
-    with:
-      context: ./worker
-      push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-  - name: Build frontend image
-    uses: docker/build-push-action@v5
-    with:
-      context: ./frontend
-      push: false
-      cache-from: type=gha
-      cache-to: type=gha,mode=max
-integration: name: Integration (Docker Compose) runs-on: ubuntu-latest needs: [test-backend, build-images]
-steps:
-  - uses: actions/checkout@v4
+      - name: Build backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  - name: Start stack
-    run: docker compose up -d --build
+      - name: Build worker
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  - name: Wait for backend health
-    run: |
-      for i in $(seq 1 30); do
-        curl -sf http://localhost:8000/health && break
-        echo "Waiting... ($i/30)"
-        sleep 3
-      done
+      - name: Build frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  - name: Debug containers
-    run: |
-      echo "=== Docker PS ==="
-      docker ps -a
+  integration:
+    name: Integration (Docker Compose)
+    runs-on: ubuntu-latest
+    needs: [test-backend, build-images]
+    steps:
+      - uses: actions/checkout@v4
 
-      echo ""
-      echo "=== Compose PS ==="
-      docker compose ps
+      - name: Start stack (3 workers via --scale)
+        run: docker compose up --scale worker=3 -d --build
 
-      echo ""
-      echo "=== Worker Logs ==="
-      docker compose logs worker
+      - name: Wait for backend to be healthy
+        run: |
+          echo "Waiting for backend /health..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null; then
+              echo "Backend is up."
+              break
+            fi
+            echo "  attempt $i/30, sleeping 3s..."
+            sleep 3
+          done
+          curl -sf http://localhost:8000/health > /dev/null \
+            || { echo "Backend never became healthy"; docker compose logs backend; exit 1; }
 
-  - name: Smoke test — submit and poll a job
-    run: |
-      JOB=$(curl -sf -X POST http://localhost:8000/api/jobs/submit \
-        -H 'Content-Type: application/json' \
-        -d '{"type":"noop","payload":{},"priority":"high"}')
+      - name: Wait for workers and assert at least 1 is active
+        run: |
+          echo "Waiting for active workers..."
+          ACTIVE=0
+          for i in $(seq 1 30); do
+            ACTIVE=$(curl -sf http://localhost:8000/api/workers \
+              | python3 -c "import sys,json; w=json.load(sys.stdin); print(sum(1 for x in w if x['status']=='active'))")
+            echo "  Active workers: $ACTIVE"
+            [ "$ACTIVE" -ge 1 ] && break
+            sleep 3
+          done
+          if [ "$ACTIVE" -lt 1 ]; then
+            echo "ERROR: No workers registered after 90s"
+            docker compose logs worker
+            exit 1
+          fi
+          echo "Workers up. Sleeping 5s for process loops to stabilise..."
+          sleep 5
 
-      echo "Submitted: $JOB"
+      - name: Show container state
+        run: |
+          docker compose ps
+          echo "--- worker logs (last 20 lines) ---"
+          docker compose logs --tail=20 worker
 
-      JOB_ID=$(echo "$JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+      - name: Smoke test - noop job completes
+        run: |
+          JOB=$(curl -sf -X POST http://localhost:8000/api/jobs/submit \
+            -H 'Content-Type: application/json' \
+            -d '{"type":"noop","payload":{},"priority":"high"}')
+          echo "Submitted: $JOB"
+          JOB_ID=$(echo "$JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          STATUS="pending"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -sf http://localhost:8000/api/jobs/$JOB_ID \
+              | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+            echo "  [$i/30] status=$STATUS"
+            [ "$STATUS" = "completed" ] && break
+            sleep 2
+          done
+          if [ "$STATUS" != "completed" ]; then
+            echo "ERROR: Job did not complete"
+            docker compose logs worker
+            exit 1
+          fi
+          echo "Noop job completed."
 
-      for i in $(seq 1 20); do
-        STATUS=$(curl -sf http://localhost:8000/api/jobs/$JOB_ID | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
-        echo "Status: $STATUS"
+      - name: Smoke test - idempotency key deduplication
+        run: |
+          R1=$(curl -sf -X POST http://localhost:8000/api/jobs/submit \
+            -H 'Content-Type: application/json' \
+            -d '{"type":"noop","payload":{},"idempotency_key":"ci-idem-1"}')
+          R2=$(curl -sf -X POST http://localhost:8000/api/jobs/submit \
+            -H 'Content-Type: application/json' \
+            -d '{"type":"noop","payload":{},"idempotency_key":"ci-idem-1"}')
+          ID1=$(echo "$R1" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          ID2=$(echo "$R2" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          echo "First:  $ID1"
+          echo "Second: $ID2"
+          [ "$ID1" = "$ID2" ] \
+            || { echo "Idempotency FAILED - different IDs returned"; exit 1; }
+          echo "Idempotency check passed."
 
-        if [ "$STATUS" = "completed" ]; then
-          break
-        fi
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
 
-        sleep 2
-      done
-
-      [ "$STATUS" = "completed" ] || (echo "Job did not complete!" && exit 1)
-
-  - name: Check worker count
-    run: |
-      WORKERS=$(curl -sf http://localhost:8000/api/workers | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
-      echo "Active workers: $WORKERS"
-      [ "$WORKERS" -ge 1 ] || (echo "No workers registered!" && exit 1)
-
-  - name: Print logs on failure
-    if: failure()
-    run: |
-      echo "=== Backend Logs ==="
-      docker compose logs backend
-
-      echo "=== Worker Logs ==="
-      docker compose logs worker
-
-      echo "=== Redis Logs ==="
-      docker compose logs redis
-
-      echo "=== Postgres Logs ==="
-      docker compose logs postgres
-
-  - name: Tear down
-    if: always()
-    run: docker compose down -v
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
