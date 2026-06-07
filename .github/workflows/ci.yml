@@ -11,7 +11,7 @@ test-backend:
 name: Backend Tests
 runs-on: ubuntu-latest
 
-```
+
 services:
   postgres:
     image: postgres:15-alpine
