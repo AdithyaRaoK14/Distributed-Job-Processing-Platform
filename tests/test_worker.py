@@ -72,10 +72,9 @@ async def test_worker_retry_exponential_backoff():
 @pytest.mark.asyncio
 async def test_worker_dead_letters_at_max_retries():
     """After max_retries attempts, status must be dead_lettered."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    import json
+    from unittest.mock import AsyncMock, MagicMock
+    import sys, os
 
-    # Build a minimal fake worker
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../worker"))
     from worker import Worker
 
@@ -83,39 +82,36 @@ async def test_worker_dead_letters_at_max_retries():
     w.worker_id = "test-worker"
     w.active_jobs = {}
 
-    # Mock DB pool
     fake_conn = AsyncMock()
-    fake_conn.fetchrow = AsyncMock(return_value={
-        "id": "job-dlq",
-        "type": "failing_job",
-        "payload": {},
-        "priority": "medium",
-        "retry_count": 3,
-        "max_retries": 3,
-        "timeout_seconds": 30,
-        "worker_id": None,
-    })
+
     db_ctx = MagicMock()
     db_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
-    db_ctx.__aexit__  = AsyncMock(return_value=False)
+    db_ctx.__aexit__ = AsyncMock(return_value=False)
+
     w.db = MagicMock()
     w.db.acquire = MagicMock(return_value=db_ctx)
 
-    # Mock Redis
     w.redis = AsyncMock()
 
-    # Capture the DB update calls
     updates = []
+
     async def mock_execute(sql, *args):
-        updates.append((sql.strip()[:40], args))
+        updates.append((str(sql), args))
+
     fake_conn.execute = mock_execute
 
-    await w._fail("job-dlq", "error", retry_count=3, max_retries=3, priority="medium")
-
-    # Should have set status=dead_lettered
-    assert any("dead_lettered" in str(u) for u in updates), (
-        f"Expected dead_lettered update, got: {updates}"
+    await w._fail(
+        "job-dlq",
+        "error",
+        retry_count=3,
+        max_retries=3,
+        priority="medium",
     )
+
+    assert any(
+        "dead_lettered" in sql.lower()
+        for sql, _ in updates
+    ), f"Expected dead_lettered update, got: {updates}"
 
 
 @pytest.mark.asyncio
@@ -123,6 +119,7 @@ async def test_worker_retries_if_under_max():
     """Job with retry_count < max_retries should be re-enqueued."""
     from unittest.mock import AsyncMock, MagicMock
     import sys, os
+
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../worker"))
     from worker import Worker
 
@@ -132,26 +129,37 @@ async def test_worker_retries_if_under_max():
 
     fake_conn = AsyncMock()
     updates = []
+
     async def mock_execute(sql, *args):
-        updates.append((str(sql)[:50], args))
+        updates.append((str(sql), args))
+
     fake_conn.execute = mock_execute
 
     db_ctx = MagicMock()
     db_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
-    db_ctx.__aexit__  = AsyncMock(return_value=False)
+    db_ctx.__aexit__ = AsyncMock(return_value=False)
+
     w.db = MagicMock()
     w.db.acquire = MagicMock(return_value=db_ctx)
 
     w.redis = AsyncMock()
 
-    # Patch asyncio.sleep so test doesn't actually wait
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(asyncio, "sleep", AsyncMock())
-        await w._fail("job-retry", "transient error", retry_count=0, max_retries=3, priority="high")
 
-    # Redis zadd should have been called to re-enqueue
+        await w._fail(
+            "job-retry",
+            "transient error",
+            retry_count=0,
+            max_retries=3,
+            priority="high",
+        )
+
     w.redis.zadd.assert_awaited_once()
-    # retry_count should have been incremented to 1
-    assert any("1" in str(u[1]) for u in updates if "pending" in str(u[0]).lower()), (
-        "Expected retry_count=1 in DB update"
-    )
+
+    assert any(
+        args[0] == 1
+        for _, args in updates
+    ), f"Expected retry_count=1 update, got: {updates}"
+
+    
